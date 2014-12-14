@@ -117,6 +117,9 @@ ConfigPanelWidget::ConfigPanelWidget(LxQtPanel *panel, QWidget *parent) :
     mOldPosition = mPanel->position();
     mPosition = mOldPosition;
 
+    mOldAutohideTb = mPanel->autohideTb();
+    mOldAutohideDuration = mPanel->autohideDuration();
+
     ui->spinBox_panelSize->setMinimum(PANEL_MINIMUM_SIZE);
     ui->spinBox_panelSize->setMaximum(PANEL_MAXIMUM_SIZE);
 
@@ -139,6 +142,9 @@ ConfigPanelWidget::ConfigPanelWidget(LxQtPanel *panel, QWidget *parent) :
     connect(ui->comboBox_alignment,         SIGNAL(activated(int)),         this, SLOT(editChanged()));
     connect(ui->comboBox_position,          SIGNAL(activated(int)),         this, SLOT(positionChanged()));
 
+    connect(ui->checkBox_autohideTb,        SIGNAL(stateChanged(int)),      this, SLOT(editChanged()));
+    connect(ui->spinBox_autohideDuration,   SIGNAL(valueChanged(int)),      this, SLOT(editChanged()));
+
     connect(ui->checkBox_customFontColor,   SIGNAL(toggled(bool)),          this, SLOT(editChanged()));
     connect(ui->pushButton_customFontColor, SIGNAL(clicked(bool)),          this, SLOT(pickFontColor()));
     connect(ui->checkBox_customBgColor,     SIGNAL(toggled(bool)),          this, SLOT(editChanged()));
@@ -146,7 +152,7 @@ ConfigPanelWidget::ConfigPanelWidget(LxQtPanel *panel, QWidget *parent) :
     connect(ui->checkBox_customBgImage,     SIGNAL(toggled(bool)),          this, SLOT(editChanged()));
     connect(ui->lineEdit_customBgImage,     SIGNAL(textChanged(QString)),   this, SLOT(editChanged()));
     connect(ui->pushButton_customBgImage,   SIGNAL(clicked(bool)),          this, SLOT(pickBackgroundImage()));
-    connect(ui->slider_opacity,             SIGNAL(sliderReleased()),      this, SLOT(editChanged()));
+    connect(ui->slider_opacity,             SIGNAL(sliderReleased()),       this, SLOT(editChanged()));
 }
 
 
@@ -168,10 +174,14 @@ void ConfigPanelWidget::reset()
     widthTypeChanged();
     ui->spinBox_length->setValue(mOldLength);
 
+    ui->checkBox_autohideTb->setChecked(mOldAutohideTb);
+    ui->spinBox_autohideDuration->setValue(mOldAutohideDuration);
+
     mFontColor.setNamedColor(mOldFontColor.name());
     ui->pushButton_customFontColor->setStyleSheet(QString("background: %1").arg(mOldFontColor.name()));
     mBackgroundColor.setNamedColor(mOldBackgroundColor.name());
     ui->pushButton_customBgColor->setStyleSheet(QString("background: %1").arg(mOldBackgroundColor.name()));
+
     ui->lineEdit_customBgImage->setText(mOldBackgroundImage);
     ui->slider_opacity->setValue(mOldOpacity);
 
@@ -295,6 +305,7 @@ void ConfigPanelWidget::editChanged()
     mPanel->setPosition(mScreenNum, mPosition, true);
 
     mPanel->setFontColor(ui->checkBox_customFontColor->isChecked() ? mFontColor : QColor(), true);
+
     if (ui->checkBox_customBgColor->isChecked())
     {
         mPanel->setBackgroundColor(mBackgroundColor, true);
@@ -308,6 +319,10 @@ void ConfigPanelWidget::editChanged()
 
     QString image = ui->checkBox_customBgImage->isChecked() ? ui->lineEdit_customBgImage->text() : QString();
     mPanel->setBackgroundImage(image, true);
+
+    // autohide
+    mPanel->setAutohide(ui->checkBox_autohideTb->isChecked());
+    mPanel->setAutohideDuration(ui->spinBox_autohideDuration->value());
 }
 
 

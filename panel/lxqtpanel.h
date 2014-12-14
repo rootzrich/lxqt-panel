@@ -29,14 +29,23 @@
 #ifndef LXQTPANEL_H
 #define LXQTPANEL_H
 
+#include <QSet>
+
 #include <QFrame>
 #include <QString>
 #include <QTimer>
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+#include <QAbstractNativeEventFilter>
+#endif
+
 #include "ilxqtpanel.h"
 #include "lxqtpanelglobals.h"
+#include <QtCore/qvariantanimation.h>
 
 class QMenu;
 class Plugin;
+class VariantAnimation;
 
 namespace LxQt {
 class Settings;
@@ -46,7 +55,7 @@ class LxQtPanelLayout;
 
 /*! \brief The LxQtPanel class provides a single lxqt-panel.
  */
-class LXQT_PANEL_API LxQtPanel : public QFrame, public ILxQtPanel
+class LXQT_PANEL_API LxQtPanel : public QFrame, public QAbstractNativeEventFilter, public ILxQtPanel
 {
     Q_OBJECT
 
@@ -57,6 +66,13 @@ public:
         AlignmentLeft   = -1,
         AlignmentCenter =  0,
         AlignmentRight  =  1
+    };
+
+    enum AutohideMsg {
+        NoMsg = 0,
+        RemoveWindow = 1,
+        SaveWindow = 2,
+        SysTrayConfigure = 3
     };
 
     LxQtPanel(const QString &configGroup, QWidget *parent = 0);
@@ -86,6 +102,10 @@ public:
     int lineCount() const { return mLineCount; }
     int length() const { return mLength; }
     bool lengthInPercents() const { return mLengthInPercents; }
+
+    bool autohideTb() const {return mAutoHideTb; }
+    int autohideDuration() const {return mAutoHideDuration; }
+
     LxQtPanel::Alignment alignment() const { return mAlignment; }
     int screenNum() const { return mScreenNum; }
     QColor fontColor() const { return mFontColor; };
@@ -95,10 +115,19 @@ public:
 
     LxQt::Settings *settings() const { return mSettings; }
 
+    bool nativeEventFilter(const QByteArray &eventType, void *message, long *);
+
 public slots:
     void show();
 
     // Settings
+
+    // autohide
+    void setAutohide(bool value);
+    void setAutohideDuration(int value);
+    void autohidePermanentLock();
+    void autohidePermanentUnlock();
+
     void setPanelSize(int value, bool save);
     void setIconSize(int value, bool save);
     void setLineCount(int value, bool save);
@@ -123,15 +152,20 @@ signals:
 protected:
     bool event(QEvent *event);
     void showEvent(QShowEvent *event);
+    void childEvent(QChildEvent *event);
 
 private slots:
     void addPlugin(const LxQt::PluginInfo &desktopFile);
     void showConfigDialog();
     void showAddPluginDialog();
     void realign();
+
     void removePlugin();
     void pluginMoved();
     void userRequestForDeletion();
+
+    //autohide    
+    void updateOffset();
 
 private:
     LxQtPanelLayout* mLayout;
@@ -156,6 +190,25 @@ private:
     int mLength;
     bool mLengthInPercents;
 
+    // autohide
+    bool mPanelActivated;
+    bool mChilds;
+    bool mAutoHideTb;
+    int  mAutoHideDuration;
+    bool mAutoHideActive;
+    bool mAutoHideLock;    
+    unsigned long int mAutohidePanel;
+    int  mAutoHidePermanentLock;    
+    void autohideActive(bool value);
+    void autohideLock ();
+    void autohideCheckLock ();
+    void autohideUnlock ();
+    QSet<long int> mMapped;
+    QRect rect;
+    int mOffset;
+    int mAnimationOffset;
+    VariantAnimation *animationPanel;
+
     Alignment mAlignment;
 
     ILxQtPanel::Position mPosition;
@@ -171,5 +224,22 @@ private:
     void updateStyleSheet();
 };
 
+class VariantAnimation : public QVariantAnimation
+{
+  Q_OBJECT
+
+public:
+  VariantAnimation(QObject* parent = 0, int* val = 0):
+  QVariantAnimation(parent) { currentValue = val; }
+
+private:
+  int *currentValue;
+
+signals:
+  void valueChanged();
+
+protected:
+  virtual void updateCurrentValue(const QVariant& value);
+};
 
 #endif // LXQTPANEL_H

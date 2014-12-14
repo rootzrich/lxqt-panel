@@ -48,6 +48,8 @@
 #include <XdgIcon>
 #include <XdgDirs>
 
+#include <xcb/xcb.h>
+
 #include <KF5/KWindowSystem/KWindowSystem>
 #include <KF5/KWindowSystem/NETWM>
 
@@ -65,6 +67,11 @@
 #define CFG_KEY_BACKGROUNDIMAGE    "background-image"
 #define CFG_KEY_OPACITY            "opacity"
 #define CFG_KEY_PLUGINS            "plugins"
+
+#define CFG_KEY_AUTOHIDE            "autohideTb"
+#define CFG_KEY_AUTOHIDEDURATION    "autohideDuration"
+#define AUTOHIDETB_SPACE 1 // unit pixels
+
 
 /************************************************
  Returns the Position by the string.
@@ -112,6 +119,13 @@ LxQtPanel::LxQtPanel(const QString &configGroup, QWidget *parent) :
     mIconSize(0),
     mLineCount(0),
     mLength(0),
+    mPanelActivated(0),
+    mChilds(0),
+    mAutoHideActive(false),
+    mAutoHideLock(false),    
+    mAutohidePanel(0),
+    mAutoHidePermanentLock(false),
+    mAnimationOffset(100),    
     mAlignment(AlignmentLeft),
     mPosition(ILxQtPanel::PositionBottom)
 {
@@ -137,6 +151,8 @@ LxQtPanel::LxQtPanel(const QString &configGroup, QWidget *parent) :
     setWindowTitle("LxQt Panel");
     setObjectName(QString("LxQtPanel %1").arg(configGroup));
 
+    animationPanel = new VariantAnimation(parent, &mAnimationOffset);
+
     LxQtPanelWidget = new QFrame(this);
     LxQtPanelWidget->setObjectName("BackgroundWidget");
     QGridLayout* lav = new QGridLayout();
@@ -158,6 +174,9 @@ LxQtPanel::LxQtPanel(const QString &configGroup, QWidget *parent) :
     connect(LxQt::Settings::globalSettings(), SIGNAL(settingsChanged()), this, SLOT(update()));
     connect(lxqtApp, SIGNAL(themeChanged()), this, SLOT(realign()));
 
+    connect(mLayout,SIGNAL(pluginMoving()), this, SLOT(autohidePermanentLock()));
+    connect(mLayout,SIGNAL(pluginMoved()), this, SLOT(autohidePermanentUnlock()));
+
     LxQtPanelApplication *app = reinterpret_cast<LxQtPanelApplication*>(qApp);
     mSettings = app->settings();
     readSettings();
@@ -165,7 +184,19 @@ LxQtPanel::LxQtPanel(const QString &configGroup, QWidget *parent) :
     ensureVisible();
     loadPlugins();
 
+    // panel autohide animation
+    animationPanel->setStartValue(0);
+    animationPanel->setEndValue(100);
+    animationPanel->setEasingCurve(QEasingCurve::OutExpo); //QEasingCurve::OutSine // QEasingCurve::OutInBack // QEasingCurve::OutCirc
+    animationPanel->setDuration(mAutoHideDuration);
+    connect (animationPanel,SIGNAL(valueChanged()), this, SLOT(updateOffset()));
+
+    // startup apply show or hide
+    autohideActive(mAutoHideTb);
+
     show();
+
+    qApp->installNativeEventFilter(this);
 }
 
 
@@ -205,6 +236,9 @@ void LxQtPanel::readSettings()
     if (!image.isEmpty())
         setBackgroundImage(image, false);
 
+    // autohide
+    setAutohide(mSettings->value(CFG_KEY_AUTOHIDE,PANEL_DEFAULT_AUTOHIDE).toBool());
+    setAutohideDuration(mSettings->value(CFG_KEY_AUTOHIDEDURATION,PANEL_DEFAULT_AUTOHIDEDURATION).toInt());
 
     mSettings->endGroup();
 }
@@ -242,6 +276,9 @@ void LxQtPanel::saveSettings(bool later)
     mSettings->setValue(CFG_KEY_POSITION, positionToStr(mPosition));
 
     mSettings->setValue(CFG_KEY_ALIGNMENT, mAlignment);
+
+    mSettings->setValue(CFG_KEY_AUTOHIDE, mAutoHideTb);
+    mSettings->setValue(CFG_KEY_AUTOHIDEDURATION, mAutoHideDuration);
 
     mSettings->setValue(CFG_KEY_FONTCOLOR, mFontColor.isValid() ? mFontColor : QColor());
     mSettings->setValue(CFG_KEY_BACKGROUNDCOLOR, mBackgroundColor.isValid() ? mBackgroundColor : QColor());
@@ -342,12 +379,75 @@ Plugin *LxQtPanel::loadPlugin(const LxQt::PluginInfo &desktopFile, const QString
         connect(plugin, SIGNAL(startMove()), mLayout, SLOT(startMovePlugin()));
         connect(plugin, SIGNAL(remove()), this, SLOT(removePlugin()));
         connect(this, SIGNAL(realigned()), plugin, SLOT(realign()));
+
         mLayout->addWidget(plugin);
         return plugin;
     }
 
     delete plugin;
     return 0;
+}
+
+
+/************************************************
+
+ ************************************************/
+void VariantAnimation::updateCurrentValue(const QVariant &value)
+{
+    if (*currentValue != value.toInt())
+    {
+        *currentValue = value.toInt();
+        emit valueChanged();
+    }
+}
+
+
+
+/************************************************
+
+ ************************************************/
+void LxQtPanel::updateOffset()
+{
+    const QRect currentScreen = QApplication::desktop()->screenGeometry(mScreenNum);
+
+    int defaultsize;
+    if (isHorizontal())
+        defaultsize = rect.height();
+    else
+        defaultsize = rect.width();
+
+    if (mAutoHideTb)
+        mOffset = mAnimationOffset;
+    else
+        mOffset = 100;
+
+    // percent to pixels
+    int mOffsetPixels = (defaultsize * (100 - mOffset)/100);
+    if (mOffsetPixels >= defaultsize)
+        mOffsetPixels = defaultsize - 1;
+
+    if (isHorizontal())
+    {
+        // Position Horiz ......................
+        if (mPosition == ILxQtPanel::PositionTop)
+            rect.moveTop(currentScreen.top() - mOffsetPixels);
+        else
+            rect.moveBottom(currentScreen.bottom() + mOffsetPixels);
+    }
+    else
+    {
+        // Position Vert .......................
+        if (mPosition == ILxQtPanel::PositionLeft)
+            rect.moveLeft(currentScreen.left() - mOffsetPixels);
+        else
+            rect.moveRight(currentScreen.right() + mOffsetPixels);
+     }
+
+    if (rect != geometry())
+    {
+        setGeometry(rect);
+        setFixedSize(rect.size());
+    }
 }
 
 
@@ -371,7 +471,6 @@ void LxQtPanel::realign()
 
     const QRect currentScreen = QApplication::desktop()->screenGeometry(mScreenNum);
     QSize size = sizeHint();
-    QRect rect;
 
     if (isHorizontal())
     {
@@ -380,6 +479,7 @@ void LxQtPanel::realign()
 
         // Size .......................
         rect.setHeight(qMax(PANEL_MINIMUM_SIZE, size.height()));
+
         if (mLengthInPercents)
             rect.setWidth(currentScreen.width() * mLength / 100.0);
         else
@@ -392,7 +492,7 @@ void LxQtPanel::realign()
 
         rect.setWidth(qMax(rect.size().width(), mLayout->minimumSize().width()));
 
-        // Horiz ......................
+        // Alignment
         switch (mAlignment)
         {
         case LxQtPanel::AlignmentLeft:
@@ -407,12 +507,6 @@ void LxQtPanel::realign()
             rect.moveRight(currentScreen.right());
             break;
         }
-
-        // Vert .......................
-        if (mPosition == ILxQtPanel::PositionTop)
-            rect.moveTop(currentScreen.top());
-        else
-            rect.moveBottom(currentScreen.bottom());
     }
     else
     {
@@ -421,6 +515,7 @@ void LxQtPanel::realign()
 
         // Size .......................
         rect.setWidth(qMax(PANEL_MINIMUM_SIZE, size.width()));
+
         if (mLengthInPercents)
             rect.setHeight(currentScreen.height() * mLength / 100.0);
         else
@@ -433,7 +528,7 @@ void LxQtPanel::realign()
 
         rect.setHeight(qMax(rect.size().height(), mLayout->minimumSize().height()));
 
-        // Vert .......................
+        // Alignment
         switch (mAlignment)
         {
         case LxQtPanel::AlignmentLeft:
@@ -448,18 +543,37 @@ void LxQtPanel::realign()
             rect.moveBottom(currentScreen.bottom());
             break;
         }
+    }
 
-        // Horiz ......................
-        if (mPosition == ILxQtPanel::PositionLeft)
-            rect.moveLeft(currentScreen.left());
-        else
-            rect.moveRight(currentScreen.right());
-    }
-    if (rect != geometry())
+    // autohide
+    if (mAutoHideTb)
     {
-        setGeometry(rect);
-        setFixedSize(rect.size());
+        // panel should hide or not?
+        if (mAutoHideActive && !mAutoHideLock  && !mChilds  && !mAutoHidePermanentLock)
+        {
+            // switch animation direction if necessary
+            if (animationPanel->direction() == QAbstractAnimation::Forward)
+            {
+                animationPanel->setDirection(QAbstractAnimation::Backward);
+                if (animationPanel->state() == QAbstractAnimation::Stopped)
+                    animationPanel->start();
+            }
+        }
+        else
+        {
+            // switch animation direction if necessary
+            if (animationPanel->direction() == QAbstractAnimation::Backward)
+            {
+                animationPanel->setDirection(QAbstractAnimation::Forward);
+                if (animationPanel->state() == QAbstractAnimation::Stopped)
+                    animationPanel->start();
+            }
+        }
     }
+
+    // for autohide
+    updateOffset();
+
     // Reserve our space on the screen ..........
     // It's possible that our geometry is not changed, but screen resolution is changed,
     // so resetting WM_STRUT is still needed. To make it simple, we always do it.
@@ -482,44 +596,57 @@ void LxQtPanel::updateWmStrut()
     // So, we use the geometry of the whole screen to calculate the strut rather than using the geometry of individual monitors.
     // Though the spec only mention Xinerama and did not mention XRandR, the rule should still be applied.
     // At least openbox is implemented like this.
-    switch (mPosition)
+    if (mAutoHideTb)
     {
-    case LxQtPanel::PositionTop:
-        KWindowSystem::setExtendedStrut(wid,
-                                        /* Left   */  0, 0, 0,
-                                        /* Right  */  0, 0, 0,
-                                        /* Top    */  height(), rect.left(), rect.right(),
-                                        /* Bottom */  0, 0, 0
-                                       );
-        break;
+                // No space reserved for a hidden taskbar
+                KWindowSystem::setExtendedStrut(wid,
+                                                /* Left   */  0, 0, 0,
+                                                /* Right  */  0, 0, 0,
+                                                /* Top    */  0, 0, 0,
+                                                /* Bottom */  0, 0, 0
+                                               );
+    }
+    else
+    {
+        switch (mPosition)
+        {
+            case LxQtPanel::PositionTop:
+                KWindowSystem::setExtendedStrut(wid,
+                                                /* Left   */  0, 0, 0,
+                                                /* Right  */  0, 0, 0,
+                                                /* Top    */  height(), rect.left(), rect.right(),
+                                                /* Bottom */  0, 0, 0
+                                               );
+                break;
 
-    case LxQtPanel::PositionBottom:
-        KWindowSystem::setExtendedStrut(wid,
-                                        /* Left   */  0, 0, 0,
-                                        /* Right  */  0, 0, 0,
-                                        /* Top    */  0, 0, 0,
-                                        /* Bottom */  wholeScreen.bottom() - rect.y(), rect.left(), rect.right()
-                                       );
-        break;
+            case LxQtPanel::PositionBottom:
+                KWindowSystem::setExtendedStrut(wid,
+                                                /* Left   */  0, 0, 0,
+                                                /* Right  */  0, 0, 0,
+                                                /* Top    */  0, 0, 0,
+                                                /* Bottom */  wholeScreen.bottom() - rect.y(), rect.left(), rect.right()
+                                               );
+                break;
 
-    case LxQtPanel::PositionLeft:
-        KWindowSystem::setExtendedStrut(wid,
-                                        /* Left   */  width(), rect.top(), rect.bottom(),
-                                        /* Right  */  0, 0, 0,
-                                        /* Top    */  0, 0, 0,
-                                        /* Bottom */  0, 0, 0
-                                       );
+            case LxQtPanel::PositionLeft:
+                KWindowSystem::setExtendedStrut(wid,
+                                                /* Left   */  width(), rect.top(), rect.bottom(),
+                                                /* Right  */  0, 0, 0,
+                                                /* Top    */  0, 0, 0,
+                                                /* Bottom */  0, 0, 0
+                                               );
 
-        break;
+                break;
 
-    case LxQtPanel::PositionRight:
-        KWindowSystem::setExtendedStrut(wid,
-                                        /* Left   */  0, 0, 0,
-                                        /* Right  */  wholeScreen.right() - rect.x(), rect.top(), rect.bottom(),
-                                        /* Top    */  0, 0, 0,
-                                        /* Bottom */  0, 0, 0
-                                       );
-        break;
+            case LxQtPanel::PositionRight:
+                KWindowSystem::setExtendedStrut(wid,
+                                                /* Left   */  0, 0, 0,
+                                                /* Right  */  wholeScreen.right() - rect.x(), rect.top(), rect.bottom(),
+                                                /* Top    */  0, 0, 0,
+                                                /* Bottom */  0, 0, 0
+                                               );
+                break;
+        }
     }
 }
 
@@ -605,6 +732,11 @@ void LxQtPanel::showAddPluginDialog()
         dialog->setWindowTitle(tr("Add Panel Widgets"));
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         connect(dialog, SIGNAL(pluginSelected(const LxQt::PluginInfo&)), this, SLOT(addPlugin(const LxQt::PluginInfo&)));
+
+        connect(dialog,SIGNAL(destroyed()), this, SLOT(autohidePermanentUnlock()));
+
+        emit autohidePermanentLock();
+
         connect(this, SIGNAL(pluginAdded(QString)), dialog, SLOT(pluginAdded(const QString &)));
         connect(this, SIGNAL(pluginRemoved(QString)), dialog, SLOT(pluginRemoved(const QString &)));
     }
@@ -698,6 +830,50 @@ void LxQtPanel::setIconSize(int value, bool save)
 
         if (save)
             saveSettings(true);
+
+        realign();
+        emit realigned();
+    }
+}
+
+
+/************************************************
+ *
+ * *********************************************/
+void LxQtPanel::setAutohide(bool value)
+{
+    if (mAutoHideTb != value)
+    {
+        mAutoHideTb = value;
+        updateStyleSheet();
+        saveSettings(true);
+
+        if (value)
+        {
+            mAutoHideActive = true;
+            mAutoHideLock = false;
+            mAutoHidePermanentLock = false;            
+            mMapped.clear();
+        }
+
+        realign();
+        emit realigned();
+    }
+}
+
+
+/************************************************
+ *
+ * *********************************************/
+void LxQtPanel::setAutohideDuration(int value)
+{
+    if (mAutoHideDuration != value)
+    {
+        mAutoHideDuration = value;
+        updateStyleSheet();
+        saveSettings(true);
+
+        animationPanel->setDuration(mAutoHideDuration);
 
         realign();
         emit realigned();
@@ -858,9 +1034,230 @@ void LxQtPanel::setOpacity(int opacity, bool save)
 /************************************************
 
  ************************************************/
+void LxQtPanel::autohideActive(bool value)
+{
+    if (!mAutoHideTb && !mAutoHideActive)
+        return;
+
+    mAutoHideActive = value;
+}
+
+
+/************************************************
+
+ ************************************************/
+void LxQtPanel::autohideCheckLock()
+{
+    if (!mMapped.count() && !mChilds)
+        autohideUnlock();
+    else
+        autohideLock();
+}
+
+
+/************************************************
+
+ ************************************************/
+void LxQtPanel::autohideLock()
+{
+    if (!mAutoHideLock)
+    {
+        mAutoHideLock = true;
+
+        realign();
+        emit realigned();
+    }
+}
+
+
+/************************************************
+
+ ************************************************/
+void LxQtPanel::autohideUnlock()
+{
+    if (mAutoHideLock)
+    {
+        mAutoHideLock = false;
+
+        realign();
+        emit realigned();
+    }
+}
+
+
+/************************************************
+Will permanently lock the autohide function. until autohidePermanentUnlock is called.
+Increments mAutoHidePermantenLock. Only if this var is 0 the panel can hide.
+ ************************************************/
+void LxQtPanel::autohidePermanentLock()
+{
+    mAutoHidePermanentLock += 1;
+
+    realign();
+    emit realigned();
+}
+
+
+/************************************************
+
+ ************************************************/
+void LxQtPanel::autohidePermanentUnlock()
+{
+    if (mAutoHidePermanentLock)
+        mAutoHidePermanentLock -= 1;
+
+    realign();
+    emit realigned();
+}
+
+
+/************************************************
+
+ ************************************************/
+bool LxQtPanel::nativeEventFilter(const QByteArray &eventType, void *message, long *)
+{    
+
+    if (!mAutoHideTb)
+        return false;
+
+    if (eventType != "xcb_generic_event_t")
+    {
+        qDebug () << "No XCB Event: " << eventType;
+        return false;
+    }
+
+    xcb_generic_event_t* event = static_cast<xcb_generic_event_t *>(message);
+    int event_type = event->response_type & ~0x80;
+
+    switch (event_type)
+    {
+
+        case XCB_ENTER_NOTIFY:
+        {
+            xcb_enter_notify_event_t *enter = (xcb_enter_notify_event_t *)event;
+
+            mAutohidePanel = enter->event;
+
+            // check if this panel was entered
+            if (effectiveWinId() == enter->event) {
+
+                // This variable is used to indicate that this panel has been hovered (so the initialization is complete)
+                // because at startup the e.g. ChildAdded event is called multiple times, but this is irrelevant for the autohide function
+                mPanelActivated = true;
+
+                // disallow panel to hide
+                autohideActive(false);
+
+                realign();
+                emit realigned();
+            }
+
+            break;
+        }
+
+        case XCB_LEAVE_NOTIFY:
+        {
+            xcb_leave_notify_event_t *leave = (xcb_leave_notify_event_t *)event;
+
+            if (effectiveWinId() == leave->event) {
+
+                // allow panel to hide
+                autohideActive(true);
+
+                realign();
+                emit realigned();
+            }
+
+            break;
+        }
+
+        case XCB_MAP_NOTIFY:
+        {
+            // nativeFilterEvent is called for all panels simultaneously, we want the call only for the panel currently active
+            // in this case mAutohidePanel is set to the corresponding window-id on EnterEvent
+            if (mAutohidePanel == effectiveWinId())
+            {
+
+                xcb_map_notify_event_t *map = (xcb_map_notify_event_t *)event;                
+
+                // add window to mapped list
+                if (mAutoHideTb)
+                {
+                    xcb_drawable_t draw = (xcb_drawable_t )map->event;
+
+                    xcb_query_tree_cookie_t treeCookie     = xcb_query_tree       (QX11Info::connection(), draw);
+                    xcb_query_tree_reply_t *tree           = xcb_query_tree_reply (QX11Info::connection(), treeCookie, NULL);
+
+                    // this check aims for windows opened from within the panel.
+                    // applications that are showing in systray are also causing mapping events, but should not have parent=root window-id.
+                    if (tree->parent == tree->root && mPanelActivated)
+                        mMapped << map->event;
+                    autohideCheckLock();
+                }
+
+            }
+
+            break;
+        }
+
+        case XCB_UNMAP_NOTIFY:
+        {
+
+            xcb_unmap_notify_event_t *unmap = (xcb_unmap_notify_event_t *)event;
+
+            mMapped -= unmap->event;
+            autohideCheckLock();
+
+            break;
+        }
+
+    }
+
+    return false;
+}
+
+
+/************************************************
+
+ ************************************************/
 QRect LxQtPanel::globalGometry() const
 {
     return QRect(mapToGlobal(QPoint(0, 0)), this->size());
+}
+
+
+/************************************************
+when a child is added from the panel it shouldn't hide
+ ************************************************/
+void LxQtPanel::childEvent(QChildEvent *event)
+{
+
+    if (!mAutoHideTb)
+        return;
+
+    switch (event->type())
+    {
+        case QEvent::ChildAdded:
+
+            if (mPanelActivated)
+                mChilds += 1;
+
+            autohideCheckLock();
+        break;
+
+        case QEvent::ChildRemoved:
+
+            if (mChilds <= 1)
+                mChilds = 0;
+            else
+                mChilds -= 1;
+
+            autohideCheckLock();
+        break;
+
+        default:
+            break;
+    }
 }
 
 
@@ -907,6 +1304,7 @@ bool LxQtPanel::event(QEvent *event)
 
     return QFrame::event(event);
 }
+
 
 /************************************************
 

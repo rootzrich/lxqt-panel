@@ -226,10 +226,6 @@ QWidget *LxQtVolume::widget()
     return m_volumeButton;
 }
 
-void LxQtVolume::realign()
-{
-}
-
 QDialog *LxQtVolume::configureDialog()
 {
 	if(!m_configDialog)

@@ -56,7 +56,6 @@ public:
     virtual QWidget *widget();
     virtual QString themeId() const { return "Volume"; }
     virtual ILxQtPanelPlugin::Flags flags() const { return PreferRightAlignment | HaveConfigDialog ; }
-    void realign();
     QDialog *configureDialog();
 
     void setAudioEngine(AudioEngine *engine);

@@ -1,5 +1,7 @@
 set(PROJECT lxqt-panel)
 
+find_package(XCB REQUIRED)
+
 set(lxqt-panel_PRIV_H_FILES
     lxqtpanel.h
     lxqtpanelapplication.h
@@ -44,6 +46,7 @@ set(MOCS
 set(LIBRARIES
     ${LXQT_LIBRARIES}
     ${QTXDG_LIBRARIES}
+    ${LIBXCB_LIBRARIES}
 )
 
 set(RESOURCES "")
@@ -67,6 +70,7 @@ project(${PROJECT})
 
 include_directories(
     ${CMAKE_CURRENT_BINARY_DIR}
+    ${LIBXCB_INCLUDE_DIR}
     ${LXQT_INCLUDE_DIRS}
     ${LXQT_INCLUDE_DIRS}/LXQt # FIXME: liblxqt seems to be broken, workaround it.
 )

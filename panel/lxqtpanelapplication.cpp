@@ -32,6 +32,10 @@
 #include <LXQt/Settings>
 #include <QtDebug>
 #include <QUuid>
+
+//# #include <LXQt/XfitMan>
+
+//# #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
 #include <QScreen>
 #include <QWindow>
 
@@ -173,6 +177,9 @@ void LxQtPanelApplication::screenDestroyed(QObject* screenObj)
     else
         qApp->setQuitOnLastWindowClosed(true);
 }
+
+//#else
+
 
 void LxQtPanelApplication::removePanel(LxQtPanel* panel)
 {
