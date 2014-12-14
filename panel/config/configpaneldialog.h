@@ -100,7 +100,12 @@ private:
     LxQtPanel::Alignment mOldAlignment;
     ILxQtPanel::Position mOldPosition;
     int mOldScreenNum;
+
+    bool mOldAutohideTb;
+    int mOldAutohideDuration;
+
     QColor mOldFontColor;
+
     QColor mOldBackgroundColor;
     QString mOldBackgroundImage;
     int mOldOpacity;

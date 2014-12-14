@@ -32,6 +32,10 @@
 #include <LXQt/Settings>
 #include <QtDebug>
 #include <QUuid>
+
+//# #include <LXQt/XfitMan>
+
+//# #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
 #include <QScreen>
 #include <QWindow>
 
@@ -173,6 +177,44 @@ void LxQtPanelApplication::screenDestroyed(QObject* screenObj)
     else
         qApp->setQuitOnLastWindowClosed(true);
 }
+
+//#else
+
+//// This X11 event is no longer supported in Qt5
+//bool LxQtPanelApplication::x11EventFilter(XEvent * event)
+//{
+//    LxQtPanel::AutohideMsg type = LxQtPanel::NoMsg;
+//    long int win = 0;
+
+//    switch (event->type)
+//    {
+//        case UnmapNotify:
+//            type = LxQtPanel::RemoveWindow;
+//            win = event->xunmap.window;
+//        break;
+
+//        case MapNotify:
+//            type = LxQtPanel::SaveWindow;
+//            win = event->xmap.window;
+//        break;
+
+//        case ClientMessage:
+//            win = event->xclient.window;
+//            if (event->xclient.data.l[1] == SYSTEM_TRAY_REQUEST_DOCK)
+//                type = LxQtPanel::SysTrayConfigure;
+//        break;
+//        default:
+//        break;
+//    }
+
+//    foreach(LxQtPanel *i, mPanels)
+//    {
+//        i->x11EventFilter(event, type, win);
+//    }
+//    return false;
+//}
+
+//#endif // Qt5
 
 void LxQtPanelApplication::removePanel(LxQtPanel* panel)
 {

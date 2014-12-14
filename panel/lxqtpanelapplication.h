@@ -32,6 +32,13 @@
 #include <LXQt/Application>
 #include "ilxqtpanelplugin.h"
 
+// from system tray plugin
+#define SYSTEM_TRAY_REQUEST_DOCK 0
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+#include <QAbstractNativeEventFilter>
+#endif
+
 class QScreen;
 
 class LxQtPanel;

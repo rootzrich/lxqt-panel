@@ -60,13 +60,6 @@ QWidget *LxQtMountPlugin::widget()
 }
 
 
-void LxQtMountPlugin::realign()
-{
-    if(mPopup)
-        mPopup->hide();
-}
-
-
 QDialog *LxQtMountPlugin::configureDialog()
 {
     if(mPopup)
