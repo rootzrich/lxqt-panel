@@ -44,6 +44,8 @@
 #include <QX11Info>
 #include <QDebug>
 
+#include <xcb/xcb.h>
+
 #include "lxqttaskbar.h"
 #include "lxqttaskbutton.h"
 #include "../panel/ilxqtpanelplugin.h"
